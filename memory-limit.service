@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep memory usage
+
+[Service]
+User=root
+#ExecStartPre=-/bin/bash -c 'kill $(ps -efA | grep memory-limit.sh | awk "{print $2}")'
+ExecStart=/bin/bash /usr/local/bin/memory-limit.sh
+#Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
