@@ -1,0 +1,13 @@
+[Unit]
+Description=Bandwidth Occupier Service (random interval and size)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=root
+ExecStart=/bin/bash /usr/local/bin/bandwidth_occupier.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
