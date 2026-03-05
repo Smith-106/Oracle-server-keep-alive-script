@@ -140,66 +140,20 @@ bandwidth() {
   curl -L https://gitlab.com/spiritysdx/Oracle-server-keep-alive-script/-/raw/main/bandwidth_occupier.sh -o bandwidth_occupier.sh && chmod +x bandwidth_occupier.sh
   mv bandwidth_occupier.sh /usr/local/bin/bandwidth_occupier.sh
   chmod +x /usr/local/bin/bandwidth_occupier.sh
-  curl -L https://gitlab.com/spiritysdx/Oracle-server-keep-alive-script/-/raw/main/bandwidth_occupier.timer -o bandwidth_occupier.timer && chmod +x bandwidth_occupier.timer
-  mv bandwidth_occupier.timer /etc/systemd/system/bandwidth_occupier.timer
   curl -L https://gitlab.com/spiritysdx/Oracle-server-keep-alive-script/-/raw/main/bandwidth_occupier.service -o bandwidth_occupier.service && chmod +x bandwidth_occupier.service
   mv bandwidth_occupier.service /etc/systemd/system/bandwidth_occupier.service
-  reading "需要自定义带宽占用的设置吗? (y/[n]) " answer
-  if [ "$answer" == "y" ]; then
-    # sed -i '/^bandwidth\|^rate/s/^/#/' /usr/local/bin/bandwidth_occupier.sh
-    sed -i '41,47s/^/# /' /usr/local/bin/bandwidth_occupier.sh
-    reading "输入你需要的带宽大小(以mbps为单位，例如10mbps输入10): " rate_mbps
-    rate=$((rate_mbps * 1000000))
-    reading "输入你需要请求的时长(以分钟为单位，例如10分钟输入10): " timeout
-    # sed -i 's/^timeout/#timeout/' /usr/local/bin/bandwidth_occupier.sh
-    sed -i '47a\timeout '$timeout'm wget $selected_url --limit-rate='$rate' -O /dev/null &' /usr/local/bin/bandwidth_occupier.sh
-    reading "输入你需要间隔的时长(以分钟为单位，例如45分钟输入45): " interval
-    sed -i "s/^OnUnitActiveSec.*/OnUnitActiveSec=$interval/" /etc/systemd/system/bandwidth_occupier.timer
-  else
-    _green "\n使用默认配置，45分钟间隔，请求6分钟，请求速率为最大速度的30%"
-    if ! command -v speedtest-cli >/dev/null 2>&1; then
-      echo "speedtest-cli not found, installing..."
-      _yellow "Installing speedtest-cli"
-      rm -rf /etc/apt/sources.list.d/speedtest.list >/dev/null 2>&1
-      ${PACKAGE_REMOVE[int]} speedtest >/dev/null 2>&1
-      ${PACKAGE_REMOVE[int]} speedtest-cli >/dev/null 2>&1
-      checkupdate
-      ${PACKAGE_INSTALL[int]} speedtest-cli
-    fi
-    if ! command -v speedtest-cli >/dev/null 2>&1; then
-      ARCH=$(uname -m)
-      if [[ "$ARCH" == "armv7l" || "$ARCH" == "armv8" || "$ARCH" == "armv8l" || "$ARCH" == "aarch64" ]]; then
-        FILE_URL="${cdn_success_url}https://github.com/showwin/speedtest-go/releases/download/v1.5.2/speedtest-go_1.5.2_Linux_arm64.tar.gz"
-      elif [[ $ARCH == "i386" ]]; then
-        FILE_URL="${cdn_success_url}https://github.com/showwin/speedtest-go/releases/download/v1.5.2/speedtest-go_1.5.2_Linux_i386.tar.gz"
-      elif [[ $ARCH == "x86_64" ]]; then
-        FILE_URL="${cdn_success_url}https://github.com/showwin/speedtest-go/releases/download/v1.5.2/speedtest-go_1.5.2_Linux_x86_64.tar.gz"
-      else
-        _red "不支持该架构：$ARCH"
-        exit 1
-      fi
-      wget -q -O speedtest-go_1.5.2_Linux.tar.gz $FILE_URL
-      if ! command -v tar >/dev/null 2>&1; then
-        yum install -y tar
-      fi
-      chmod 777 speedtest-go_1.5.2_Linux.tar.gz
-      tar -xvf speedtest-go_1.5.2_Linux.tar.gz
-      chmod 777 speedtest-go
-      mv speedtest-go /usr/local/bin/
-      rm -rf README.md* LICENSE* >/dev/null 2>&1
-      rm -rf speedtest-go_1.5.2_Linux.tar.gz* >/dev/null 2>&1
-    fi
-  fi
+
   systemctl daemon-reload
-  systemctl enable bandwidth_occupier.timer
-  if systemctl start bandwidth_occupier.timer; then
-    _green "带宽限制安装成功 脚本路径: /usr/local/bin/bandwidth_occupier.sh"
+  systemctl disable bandwidth_occupier.timer >/dev/null 2>&1 || true
+  systemctl stop bandwidth_occupier.timer >/dev/null 2>&1 || true
+  systemctl enable bandwidth_occupier.service
+  if systemctl restart bandwidth_occupier.service; then
+    _green "带宽占用安装成功 脚本路径: /usr/local/bin/bandwidth_occupier.sh"
   else
-    restorecon /etc/systemd/system/bandwidth_occupier.timer
     restorecon /etc/systemd/system/bandwidth_occupier.service
-    systemctl enable bandwidth_occupier.timer
-    systemctl start bandwidth_occupier.timer
-    _green "带宽限制安装成功 脚本路径: /usr/local/bin/bandwidth_occupier.sh"
+    systemctl enable bandwidth_occupier.service
+    systemctl restart bandwidth_occupier.service
+    _green "带宽占用安装成功 脚本路径: /usr/local/bin/bandwidth_occupier.sh"
   fi
   _green "The bandwidth limit script has been installed at /usr/local/bin/bandwidth_occupier.sh"
 }
@@ -373,21 +327,11 @@ check_service_status() {
 check_services_status() {
   check_service_status "cpu-limit.service"
   check_service_status "memory-limit.service"
-  if [ -e "/usr/local/bin/bandwidth_occupier.sh" ]; then
-    if grep -qE '^\s*#' <(sed -n '32,38p' /usr/local/bin/bandwidth_occupier.sh); then
-      line=$(sed -n '39p' /usr/local/bin/bandwidth_occupier.sh)
-      timeout=$(echo "$line" | awk '{print $2}' | awk -F 'm' '{print $1}')
-      limit_rate=$(echo "$line" | awk -F '--limit-rate=' '{print $2}' | awk '{print $1}')
-      limit_rate_mbps=$(echo "scale=2; $limit_rate/1000000" | bc)
-      on_unit_active_sec=$(grep -oP '^OnUnitActiveSec *= *\K[^ ]+' /etc/systemd/system/bandwidth_occupier.timer)
-      _blue "带宽占用使用配置：每隔 $on_unit_active_sec 分钟占用 $limit_rate_mbps Mbps 速率下载文件 $timeout 分钟"
-    else
-      _blue "带宽占用使用配置：自动检测带宽每隔45分钟占用6分钟以最大带宽的30%速率下载文件"
-    fi
+  if systemctl is-active --quiet "bandwidth_occupier.service"; then
+    _blue "带宽占用使用配置：10秒到1小时随机触发，下载1KB到1GB文件（间隔越长上限越高），下载完成自动删除临时文件"
     _blue "bandwidth_occupier.service 已设置"
-  elif [ -e "/etc/speedtest-cli/speedtest-go" ]; then
-    _blue "带宽占用使用配置：使用speedtest-go每45分钟执行10次进行占用，使用机器最大的带宽"
-    _blue "bandwidth_occupier.service 已设置"
+  elif systemctl is-active --quiet "bandwidth_occupier.timer"; then
+    _blue "bandwidth_occupier.timer 已设置（旧版定时模式）"
   else
     _blue "bandwidth_occupier.service 未设置"
   fi
